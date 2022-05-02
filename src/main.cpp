@@ -7,10 +7,12 @@
 #include <DHT_U.h>				// Same as above
 #include <Adafruit_GFX.h>		// Graphics for the OLED
 #include <Adafruit_SSD1306.h>	// Library for the specific OLED
+#include <Wire.h>				// I2C stuff
 #include <ThingSpeak.h>			// Library to speak to ThingSpeak
 // - Custom
 #include "Wifi/CustomWifi.h"	// Header file for a custom class to take care of the Wifi (uses WiFiNINA).
 #include "DHT/CustomDHT.h"		// Header file for a custom class to take care of DHT.
+#include "OLED/CustomOLED.h"	// Header file for a custom class to take care of OLED.
 #include "secrets/mqtt.h"		// Secret header file containing MQTT credentials
 #include "secrets/wifi.h"		// Secret header file containing WiFi credentials
 #include "definitions.h"		// Header file containing various definitions
@@ -26,8 +28,10 @@ DHT_Unified dht(DHTPIN, DHTTYPE);	// The DHT_unified object; this contains e.g. 
 uint32_t delayMS;							// Set the delay for the sensor
 // - Millis
 unsigned long lastMillis = 0;				// Last millis
-
 const long interval = 20000;				// Millis interval to use. 20s for ThingSpeak.
+// - OLED
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+CustomOLED oled;
 
 /*
  **** Actual code ****
@@ -39,6 +43,7 @@ const long interval = 20000;				// Millis interval to use. 20s for ThingSpeak.
 void setup() {
 	// Initialisation
 	Serial.begin(9600);															// Start serial
+	Wire.begin();																			// Start I2C
 	while (!Serial) {;}																		// Wait for a serial port before continuing.
 	dht.begin();																			// Start the DHT11
 	sensor_t sensor;																		// Define a sensor_t object
@@ -46,6 +51,17 @@ void setup() {
 	CustomWifi::wifiStartup((char *) SECRET_SSID, (char *) SECRET_PASS, status);	// Connect to WiFi
 	CustomWifi::printWiFiStatus();															// Print Wifi Status (Just whihc SSID and the local IP)
 	ThingSpeak.begin(wifiClient);
+
+	// Start OLED
+	// SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+	if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address for 128x64
+		Serial.println(F("SSD1306 allocation failed"));
+		for(;;); // Don't proceed, loop forever
+	}
+
+	oled.display = display;			// Set the display to the started OLED
+	oled.clear();					// Clear the display
+	oled.println("Scan RFID");	// Tell the user what to do
 }
 
 /**
@@ -61,6 +77,9 @@ void loop() {
 
 	if (millis() - lastMillis > interval) {
 		lastMillis = millis();
+
+		oled.clear();
+		oled.println("Scan RFID");
 
 		// Print temperature and humidity
 		float temperature = CustomDHT::dhtGetTemperature(dht);
