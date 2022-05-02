@@ -1,9 +1,9 @@
 // Includes
 // - Libraries
-#include <WiFiNINA.h>		// Library to control the WiFi stuff
+#include "WiFiNINA.h"        // Library to control the WiFi stuff
 // - Custom
 #include "CustomWifi.h"
-#include "CustomSerial.h"
+#include "Serial/CustomSerial.h"
 
 void CustomWifi::wifiStartup(char *ssid, char *pass, int status) {
 	// Check for the WiFi module:

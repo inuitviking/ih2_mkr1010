@@ -7,7 +7,9 @@
 
 
 class CustomDHT {
-
+public:
+	static float dhtGetTemperature (DHT_Unified dht);
+	static float dhtGetHumidity (DHT_Unified dht);
 };
 
 

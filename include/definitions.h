@@ -1,8 +1,7 @@
-//
-// Created by angus on 5/2/22.
-//
-
 #ifndef IH2_MKR1010_DEFINITIONS_H
 #define IH2_MKR1010_DEFINITIONS_H
+
+// DHT11
+#define DHTTYPE DHT11
 
 #endif //IH2_MKR1010_DEFINITIONS_H
