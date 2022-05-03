@@ -44,15 +44,6 @@ DS3231 aClock;
  * The function to setup your board.
  */
 void setup() {
-	// Start OLED
-	// SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
-	if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address for 128x64
-		Serial.println(F("SSD1306 allocation failed"));
-		for(;;); // Don't proceed, loop forever
-	}
-
-	oled.display = display;			// Set the display to the started OLED
-	oled.println("Connect to serial to start");
 	// Initialisation
 	Serial.begin(9600);															// Start serial
 	Wire.begin();																			// Start I2C
@@ -61,8 +52,15 @@ void setup() {
 	sensor_t sensor;																		// Define a sensor_t object
 	delayMS = sensor.min_delay / 1000;														// Set the delay of that sensor
 
+	// Start OLED
+	// SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+	if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address for 128x64
+		Serial.println(F("SSD1306 allocation failed"));
+		for(;;); // Don't proceed, loop forever
+	}
+
 	oled.clear();
-	String wifiStartupText = "Connecting to ";
+	String wifiStartupText = "Connecting to\n";
 	wifiStartupText += SECRET_SSID;
 	oled.println(wifiStartupText);
 
