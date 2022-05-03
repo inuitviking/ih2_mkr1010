@@ -6,7 +6,7 @@
 #define IH2_MKR1010_CUSTOMOLED_H
 
 
-class CustomOLED {
+class CustomOLED: Adafruit_SSD1306 {
 
 public:
 	void clear();
