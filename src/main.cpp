@@ -47,11 +47,6 @@ void setup() {
 	// Initialisation
 	Serial.begin(9600);															// Start serial
 	Wire.begin();																			// Start I2C
-	while (!Serial) {;}																		// Wait for a serial port before continuing.
-	dht.begin();																			// Start the DHT11
-	sensor_t sensor;																		// Define a sensor_t object
-	delayMS = sensor.min_delay / 1000;														// Set the delay of that sensor
-
 	// Start OLED
 	// SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
 	if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address for 128x64
@@ -59,8 +54,15 @@ void setup() {
 		for(;;); // Don't proceed, loop forever
 	}
 
+	oled.display = display;			// Set the display to the started OLED
+	oled.println("Connect to serial to start");
+	while (!Serial) {;}																		// Wait for a serial port before continuing.
+	dht.begin();																			// Start the DHT11
+	sensor_t sensor;																		// Define a sensor_t object
+	delayMS = sensor.min_delay / 1000;														// Set the delay of that sensor
+
 	oled.clear();
-	String wifiStartupText = "Connecting to\n";
+	String wifiStartupText = "Connecting to \n";
 	wifiStartupText += SECRET_SSID;
 	oled.println(wifiStartupText);
 
@@ -95,7 +97,7 @@ void loop() {
 		String time = String(aClock.getHour(h12Flag, pmFlag), DEC);
 		time += ":";
 		time += String(aClock.getMinute(), DEC);
-		oled.display.setCursor(100,0);
+		oled.display.setCursor(95,0);
 		oled.display.print(time);
 		oled.display.display();
 
