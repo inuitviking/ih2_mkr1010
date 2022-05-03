@@ -12,6 +12,7 @@
 #include <Wire.h>				// I2C stuff
 #include <DS3231.h>				// Clock
 //#include <Servo.h>				// Servo
+#include <Encoder.h>			// Encoder stuff
 #include <ThingSpeak.h>			// Library to speak to ThingSpeak
 // - Custom
 #include "Wifi/CustomWifi.h"	// Header file for a custom class to take care of the Wifi (uses WiFiNINA).
@@ -42,15 +43,24 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 CustomOLED oled;
 // - Clock
 DS3231 aClock;
+bool h12Flag;
+bool pmFlag;
 // - RFID
-MFRC522 mfrc522(A1, RST_PIN);	// Create MFRC522 instance
+MFRC522 mfrc522(SS_PIN, RST_PIN);	// Create MFRC522 instance
 byte accCards[][4] = {											// Accepted cards
 		{0x40, 0x98, 0x6D, 0xA5},
 		{0xE2, 0xFB, 0x50, 0x73}
 };
+// - Authentication
+boolean authenticated = false;
 // - Servo
 Servo servo;
 int servoAngle = 0;
+// - Encoder
+Encoder encoder(ENCODERPINA, ENCODERPINB);	// Configure the encoder
+long oldPosition = -999;								// Just the old position.
+int btnLastState = HIGH;								// The previous state from the input pin
+int btnCurrentState;									// The current reading from the input pin
 
 /*
  **** Actual code ****
@@ -89,19 +99,17 @@ void setup() {
 
 	oled.clear();																			// Clear the display
 	oled.println("Scan RFID");															// Tell the user what to do
-
-	// Construct time string
-	bool h12Flag;
-	bool pmFlag;
-	String time = String(aClock.getHour(h12Flag, pmFlag), DEC);
+	String time = String(aClock.getHour(h12Flag, pmFlag), DEC);					// Construct time string
 	time += ":";
 	time += String(aClock.getMinute(), DEC);
-	oled.display.setCursor(95,0);
-	oled.display.print(time);
-	oled.display.display();
+	oled.display.setCursor(95,0);														// Set cursor position
+	oled.display.print(time);																// Print time
+	oled.display.display();																	// Display
 
 	servo.attach(SERVOPIN);																// Attach servo
-	servoAngle = CustomServo::close(servo, servoAngle);
+	servoAngle = CustomServo::close(servo, servoAngle);								// Close it if it is open
+
+	pinMode(ENCODERBTN, INPUT_PULLUP);									// Button from encoder
 }
 
 /**
@@ -109,30 +117,47 @@ void setup() {
  */
 void loop() {
 
-	if (millis() - dhtMillis > dhtInterval) {
-		oled.clear();
-		dhtMillis = millis();
-		servoAngle = CustomServo::close(servo, servoAngle);
-		oled.println("Scan RFID");
-		// Construct time string
-		bool h12Flag;
-		bool pmFlag;
-		String time = String(aClock.getHour(h12Flag, pmFlag), DEC);
+	int statusCode = 0;
+
+	String door = ThingSpeak.readStringField(MQTT_CH_ID, 3, MQTT_READ_API_KEY);
+
+	// Check the status of the read operation to see if it was successful
+	statusCode = ThingSpeak.getLastReadStatus();
+	if(statusCode == 200){
+		if (door == "1") {
+			servoAngle = CustomServo::open(servo, servoAngle);
+			Serial.println("Door Open");
+		} else if (door == "0") {
+			servoAngle = CustomServo::close(servo, servoAngle);
+			Serial.println("Door Closed");
+		}
+	}else{
+		Serial.println("Problem reading channel. HTTP error code " + String(statusCode));
+	}
+
+	delay(500);
+
+	/********************************
+	********** Long Millis **********
+	********************************/
+	if (millis() - dhtMillis > dhtInterval && !authenticated) {
+		oled.clear();																													// Clear OLED
+		dhtMillis = millis();																											// Set dhtMillis
+		servoAngle = CustomServo::close(servo, servoAngle);																		// Close the servo
+		oled.println("Scan RFID");																									// Tell the user what to do
+		String time = String(aClock.getHour(h12Flag, pmFlag), DEC);															// Construct time string
 		time += ":";
 		time += String(aClock.getMinute(), DEC);
-		oled.display.setCursor(95, 0);
-		oled.display.print(time);
-		oled.display.display();
+		oled.display.setCursor(95, 0);																							// Set the cursor to where we want to print the clock.
+		oled.display.print(time);																										// Print the time.
+		oled.display.display();																											// Put it on the display.
 
-		// Print temperature and humidity
-		float temperature = CustomDHT::dhtGetTemperature(dht);
-		float humidity = CustomDHT::dhtGetHumidity(dht);
+		float temperature = CustomDHT::dhtGetTemperature(dht);																			// Get the temperature.
+		float humidity = CustomDHT::dhtGetHumidity(dht);																				// Get the humidity.
 
-		// Check if temperature or humidity is wrong
-		if (temperature == -300.0 || humidity == -1) {
-			Serial.println("Check sensors!");
-		} else {
-			// Else just send.
+		if (temperature == -300.0 || humidity == -1) {																					// Check if temperature or humidity is wrong.
+			Serial.println("Check sensors!");																							// Tell the user via terminal what to do.
+		} else {																														// Else just send.
 			Serial.print("Temperature: ");
 			Serial.print(String(temperature).c_str());
 			Serial.println("°C");
@@ -140,42 +165,115 @@ void loop() {
 			Serial.print(String(humidity).c_str());
 			Serial.println("%");
 
-			// Put values in their respective fields
-			ThingSpeak.setField(1, temperature);
-			ThingSpeak.setField(2, humidity);
-			// Write to both fields to the service, and get the HTTP status code while we're at it.
-			int statusCode = ThingSpeak.writeFields((unsigned long) MQTT_CH_ID, (char *) MQTT_WRITE_API_KEY);
-			// If the status code is 200, all is good; else it isn't.
-			if (statusCode == 200) return;
-			Serial.println("Problem updating channel. HTTP error code " + String(statusCode));
+			ThingSpeak.setField(1, temperature);																				// Put temperature in field 1.
+			ThingSpeak.setField(2, humidity);																				// Put humidity in field 2.
+			int statusCode = ThingSpeak.writeFields((unsigned long) MQTT_CH_ID, (char *) MQTT_WRITE_API_KEY);	// Write to both fields to the service, and get the HTTP status code
+			if (statusCode == 200) return;																								// If the status code is 200, all is good.
+			Serial.println("Problem updating channel. HTTP error code " + String(statusCode));										// If not, print to serial that it isn't.
 		}
 	}
 
+	/********************************
+	********* Short Millis **********
+	********************************/
 	if (millis() - lastMillis >= interval) {
-		oled.clear();
-		lastMillis = millis();
-		servoAngle = CustomServo::close(servo, servoAngle);
-		oled.println("Scan RFID");
-		// Construct time string
-		bool h12Flag;
-		bool pmFlag;
-		String time = String(aClock.getHour(h12Flag, pmFlag), DEC);
-		time += ":";
-		time += String(aClock.getMinute(), DEC);
-		oled.display.setCursor(95, 0);
-		oled.display.print(time);
-		oled.display.display();
+		if (!authenticated){
+			oled.clear();																// Clear OLED.
+			lastMillis = millis();														// Set lastMillis.
+			servoAngle = CustomServo::close(servo, servoAngle);					// Close the servo.
+			oled.println("Scan RFID");												// Tell the user what to do.
+			String time = String(aClock.getHour(h12Flag, pmFlag), DEC);		// Construct clock string.
+			time += ":";
+			time += String(aClock.getMinute(), DEC);
+			oled.display.setCursor(95, 0);										// Set the cursor to where we want to print the clock.
+			oled.display.print(time);													// Print the time.
+			oled.display.display();														// Put it on the display.
+		} else {
+			long newPosition = encoder.read();
+			oled.clear();
+			if (newPosition == 0) {
+				oldPosition = newPosition;
+				oled.display.setTextColor(BLACK, WHITE);
+				oled.display.println("Show temperature");
+				oled.display.setTextColor(WHITE, BLACK);
+				oled.display.println("Show humidity.");
+				oled.display.setTextColor(WHITE, BLACK);
+				oled.display.println("Lock and disengage");
+				oled.display.display();
+				oled.println(String(newPosition));
+			} else if (newPosition == 4) {
+				oldPosition = newPosition;
+				oled.display.setTextColor(WHITE, BLACK);
+				oled.display.println("Show temperature");
+				oled.display.setTextColor(BLACK, WHITE);
+				oled.display.println("Show humidity.");
+				oled.display.setTextColor(WHITE, BLACK);
+				oled.display.println("Lock and disengage");
+				oled.display.display();
+				oled.println(String(newPosition));
+			} else if (newPosition == 8) {
+				oldPosition = newPosition;
+				oled.display.setTextColor(WHITE, BLACK);
+				oled.display.println("Show temperature");
+				oled.display.setTextColor(WHITE, BLACK);
+				oled.display.println("Show humidity.");
+				oled.display.setTextColor(BLACK, WHITE);
+				oled.display.println("Lock and disengage");
+				oled.display.display();
+				oled.println(String(newPosition));
+			} else {
+				oldPosition = newPosition;
+				oled.display.setTextColor(BLACK, WHITE);
+				oled.display.println("Show temperature");
+				oled.display.setTextColor(WHITE, BLACK);
+				oled.display.println("Show humidity.");
+				oled.display.setTextColor(WHITE, BLACK);
+				oled.display.println("Lock and disengage");
+				oled.display.display();
+				oled.println(String(newPosition));
+			}
+
+			btnCurrentState = digitalRead(ENCODERBTN);
+			if (btnLastState == LOW && btnCurrentState == HIGH) {
+				oled.clear();
+				if (newPosition == 0) {
+					String temperatureString = "Temperature: ";
+					temperatureString += CustomDHT::dhtGetTemperature(dht);
+					temperatureString += (char)247;
+					temperatureString += "C";
+					oled.println(temperatureString);
+					delay(2000);
+				} else if (newPosition == 4) {
+					String humidityString = "Humidity: ";
+					humidityString += CustomDHT::dhtGetHumidity(dht);
+					humidityString += "%";
+					oled.println(humidityString);
+					delay(2000);
+				} else if (newPosition == 8) {
+					servoAngle = CustomServo::close(servo, servoAngle);
+					authenticated = false;
+				}
+			}
+
+
+			// save the last state
+			btnLastState = btnCurrentState;
+		}
 	}
 
-	// Reconnect Wifi if it dies.
-	if (WiFi.status() != WL_CONNECTED) {
-		Serial.print("Lost WiFi connection. Attempting to reconnect to ");
+	/********************************
+	******* WiFi Reconnection *******
+	********************************/
+	if (WiFi.status() != WL_CONNECTED) {														// If we're no longer connected
+		Serial.print("Lost WiFi connection. Attempting to reconnect to ");						// Say that we are no longer connected (in serial) and that we're going to try again
 		Serial.println((char *) SECRET_SSID);
-		CustomWifi::wifiStartup((char *) SECRET_SSID, (char *) SECRET_PASS, status);
+		CustomWifi::wifiStartup((char *) SECRET_SSID, (char *) SECRET_PASS, status);	// Attempt reconnection of WiFi
 	}
 
-	// Look for new cards, and select one if present
-	if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
+	/********************************
+	**** AUTHENTICATION OF CARDS ****
+	********************************/
+	if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {											// Look for new cards, and select one if present
 		return;
 	}
 
@@ -183,23 +281,19 @@ void loop() {
 	for(int i = 0; i < len; i++) {																						// Loop through card array
 		if (memcmp(accCards[0], mfrc522.uid.uidByte, len) == 0 || memcmp(accCards[1], mfrc522.uid.uidByte, len) == 0) {	// If card is in array
 			lastMillis = millis();																						// Set previous millis
+			authenticated = true;
 			oled.clear();																								// Clear OLED
-
 			oled.println("Card authorized. Welcome.");																// Print authorized text
-
 			servoAngle = CustomServo::open(servo, servoAngle);													// Open "door"
-		} else {													// If card is NOT in array
+		} else {																										// If card is NOT in array
 			lastMillis = millis();																						// Set previous millis
 			oled.clear();																								// Clear OLED
-
 			servoAngle = CustomServo::close(servo, servoAngle);													// Close "Door"
 			oled.println("CARD NOT AUTHORIZED.");																	// Print authorized text
-			// Draw box with cross
-			display.drawRect(45, 12, 40, 40, WHITE);
+			display.drawRect(45, 12, 40, 40, WHITE);													// Draw box with cross
 			display.drawLine(45,12,83,50, WHITE);
 			display.drawLine(45, 50, 83, 12, WHITE);
-			// Display box.
-			display.display();
+			display.display();																							// Display box.
 		}
 	}
 }
