@@ -1,6 +1,7 @@
 // Includes
 // - Libraries
-#include <Arduino.h>			// The main arduino library
+//#include <Arduino.h>			// The main arduino library
+#include <ArduinoBLE.h>			// Arduino Bluetooth LE library
 #include <SPI.h>				// For reading the RFID
 #include <MFRC522.h>			// For reading the RFID
 #include <Servo.h>				// Library to control a servo
@@ -30,6 +31,10 @@
 int keyIndex = 0;							// your network key Index number (needed only for WEP)
 int status = WL_IDLE_STATUS;				// The idle status of the WiFi
 WiFiClient wifiClient;						// The WiFi client
+// - Bluetooth
+BLEService newService("180A");															// creating the service
+BLEUnsignedCharCharacteristic randomReading("2A58", BLERead | BLENotify);	// creating the Analog Value characteristic
+BLEByteCharacteristic switchChar("2A57", BLERead | BLEWrite);				// creating the LED characteristic
 // - DHT
 DHT_Unified dht(DHTPIN, DHTTYPE);	// The DHT_unified object; this contains e.g. both humidity and temperature
 uint32_t delayMS;							// Set the delay for the sensor
@@ -106,6 +111,31 @@ void setup() {
 	oled.display.print(time);																// Print time
 	oled.display.display();																	// Display
 
+	/**
+	 * This does not work in parallel, you have to disable WiFi to activate BLE, ad vice versa.
+	 * In other words, I need to do some channel hopping, so turn off WiFi when I want to use BLE,
+	 * and turn off BLE when I want to use WiFi. This is not ideal in my use case, but could be
+	 * used in situations, such as if you don't know what kind of connectivity you use on a
+	 * specific field.
+	 * See following links for ideas.
+	 * General discussion:					https://forum.arduino.cc/t/bluetooth-and-wifi-in-parallel/878198/5
+	 * Code that uses both WiFi and BLE:	https://forum.arduino.cc/t/switching-between-wifi-and-ble/629966/7
+	 * About the NINA-W10 series:			https://www.u-blox.com/en/product/nina-w10-series-open-cpu
+	 */
+//	if (!BLE.begin()) {																		// Initialise BLE
+//		Serial.println("starting BLE failed!");												// Loop forever if it's failing
+//		while (1);
+//	}
+//	BLE.setLocalName("MKR WiFi 1010");														// Setting a name that will appear when scanning for bluetooth devices
+//	BLE.setAdvertisedService(newService);
+//	newService.addCharacteristic(switchChar);											// Add characteristics to a service
+//	newService.addCharacteristic(randomReading);
+//	BLE.addService(newService);															// adding the service
+//	switchChar.writeValue(0);															//set initial value for characteristics
+//	randomReading.writeValue(0);
+//	BLE.advertise();																		//start advertising the service
+//	Serial.println("Bluetooth device active, waiting for connections...");
+
 	servo.attach(SERVOPIN);																// Attach servo
 	servoAngle = CustomServo::close(servo, servoAngle);								// Close it if it is open
 
@@ -116,26 +146,26 @@ void setup() {
  * The loop function contains all the code that needs to be looped through.
  */
 void loop() {
+	/********************************
+	************** MQTT *************
+	********************************/
 
 	int statusCode = 0;
-
 	String door = ThingSpeak.readStringField(MQTT_CH_ID, 3, MQTT_READ_API_KEY);
 
 	// Check the status of the read operation to see if it was successful
 	statusCode = ThingSpeak.getLastReadStatus();
 	if(statusCode == 200){
-		if (door == "1") {
+		if (door == "1" && !authenticated) {
 			servoAngle = CustomServo::open(servo, servoAngle);
 			Serial.println("Door Open");
-		} else if (door == "0") {
+		} else if (door == "0" && !authenticated) {
 			servoAngle = CustomServo::close(servo, servoAngle);
 			Serial.println("Door Closed");
 		}
 	}else{
 		Serial.println("Problem reading channel. HTTP error code " + String(statusCode));
 	}
-
-	delay(500);
 
 	/********************************
 	********** Long Millis **********
@@ -269,6 +299,44 @@ void loop() {
 		Serial.println((char *) SECRET_SSID);
 		CustomWifi::wifiStartup((char *) SECRET_SSID, (char *) SECRET_PASS, status);	// Attempt reconnection of WiFi
 	}
+
+	/********************************
+	*********** Bluetooth ***********
+	********************************/
+	//	BLEDevice central = BLE.central();																									// Wait for a BLE central
+//	if (central) {																														// If a central is connected to the peripheral
+//		Serial.print("Connected to central: ");
+//
+//		Serial.println(central.address());																							// print the central's BT address
+//
+//		digitalWrite(LED_BUILTIN, HIGH);																				// turn on the LED to indicate the connection
+//
+//		// Check the battery level every 200ms
+//		// While the central is connected:
+//		while (central.connected()) {
+//			unsigned long currentMillis = millis();
+//
+//			if (currentMillis - lastMillis >= interval) {																				// If 200ms have passed, we check the battery level
+//				lastMillis = currentMillis;
+//
+//				int randomValue = analogRead(A2);
+//				randomReading.writeValue(randomValue);
+//
+//				if (switchChar.written()) {
+//					if (switchChar.value()) {																							// any value other than 0
+//						servoAngle = CustomServo::open(servo, servoAngle);
+//					} else {																											// a 0 value
+//						servoAngle = CustomServo::close(servo, servoAngle);
+//					}
+//				}
+//
+//			}
+//		}
+//
+//		digitalWrite(LED_BUILTIN, LOW);																					// When the central disconnects, turn off the LED
+//		Serial.print("Disconnected from central: ");
+//		Serial.println(central.address());
+//	}
 
 	/********************************
 	**** AUTHENTICATION OF CARDS ****
